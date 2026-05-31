@@ -1,0 +1,761 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>電腦借閱登記表</title>
+
+  <!-- Firebase SDK (即時同步) -->
+  <script type="module">
+    import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
+    import { getDatabase, ref, onValue, set, remove, update }
+      from "https://www.gstatic.com/firebasejs/10.12.0/firebase-database.js";
+
+    // ===== 在此貼上 Firebase 設定（見頁尾說明） =====
+    const firebaseConfig = {
+      apiKey: "AIzaSyDsiQVq2VGN4oBqF21SP-ht0gs62F-U99Y",
+      authDomain: "chromebook-check-out-system.firebaseapp.com",
+      databaseURL: "https://chromebook-check-out-system-default-rtdb.asia-southeast1.firebasedatabase.app",
+      projectId: "chromebook-check-out-system",
+      storageBucket: "chromebook-check-out-system.firebasestorage.app",
+      messagingSenderId: "715912491849",
+      appId: "1:715912491849:web:a412e984da2643dd7de098"
+    };
+    // ================================================
+
+    let app, db;
+    try {
+      app = initializeApp(firebaseConfig);
+      db = getDatabase(app);
+      window.__firebaseReady = true;
+    } catch (e) {
+      console.warn("Firebase 尚未設定，目前使用離線模式（資料不會同步）。", e);
+      window.__firebaseReady = false;
+    }
+
+    window.fb = { db, ref, onValue, set, remove, update };
+  </script>
+
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: "Microsoft JhengHei", "PingFang TC", sans-serif;
+      background: #f0f4f8;
+      padding: 16px;
+      min-width: 1000px;
+      color: #222;
+    }
+
+    .top-bar {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      max-width: 1400px;
+      margin: 0 auto 8px;
+    }
+
+    h1 {
+      color: #1a3a5c;
+      font-size: 1.5rem;
+    }
+
+    #sync-status {
+      font-size: 0.85rem;
+      padding: 4px 12px;
+      border-radius: 12px;
+      background: #e0e0e0;
+      color: #555;
+    }
+    #sync-status.online { background: #d4edda; color: #155724; }
+    #sync-status.offline { background: #f8d7da; color: #721c24; }
+
+    #week-label {
+      text-align: center;
+      color: #555;
+      margin-bottom: 12px;
+      font-size: 1rem;
+      font-weight: bold;
+    }
+
+    .week-nav {
+      display: flex;
+      justify-content: center;
+      gap: 10px;
+      margin-bottom: 14px;
+    }
+
+    .week-nav button, .admin-btn {
+      padding: 6px 16px;
+      border: 1px solid #1a3a5c;
+      background: white;
+      color: #1a3a5c;
+      border-radius: 4px;
+      cursor: pointer;
+      font-size: 0.9rem;
+      font-family: inherit;
+    }
+    .week-nav button:hover, .admin-btn:hover { background: #1a3a5c; color: white; }
+
+    .admin-btn {
+      border-color: #8b3a62;
+      color: #8b3a62;
+    }
+    .admin-btn:hover { background: #8b3a62; color: white; }
+    .admin-btn.active { background: #8b3a62; color: white; }
+
+    .table-wrapper { overflow-x: auto; max-width: 1400px; margin: 0 auto; }
+
+    table {
+      border-collapse: collapse;
+      width: 100%;
+      background: white;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+      border-radius: 8px;
+      overflow: hidden;
+    }
+
+    thead th {
+      background: #1a3a5c;
+      color: white;
+      padding: 10px 6px;
+      text-align: center;
+      font-size: 0.95rem;
+      white-space: nowrap;
+    }
+    thead th.day-header { min-width: 200px; }
+    thead th.period-header { min-width: 75px; background: #2a5080; }
+
+    /* 隔列淺綠色 */
+    tbody tr:nth-child(odd) td { background: #ffffff; }
+    tbody tr:nth-child(even) td { background: #e8f7e4; }
+    tbody tr:nth-child(odd) td.period-label { background: #e8f0f8; }
+    tbody tr:nth-child(even) td.period-label { background: #c8e6c0; }
+    tbody tr td.period-label.lunch { background: #fff0d4 !important; color: #b04a00; }
+
+    /* 綠色列的「+ 登記」按鈕用深綠色 */
+    tbody tr:nth-child(even) .commit-btn { background: #3d8b40; }
+    tbody tr:nth-child(even) .commit-btn:hover { background: #2e6b30; }
+
+    td {
+      padding: 6px;
+      border: 1px solid #d0dce8;
+      vertical-align: top;
+      text-align: center;
+    }
+
+    td.period-label {
+      font-weight: bold;
+      color: #1a3a5c;
+      white-space: nowrap;
+      font-size: 0.9rem;
+      vertical-align: middle;
+    }
+
+    .cell-form {
+      display: flex;
+      flex-direction: column;
+      gap: 3px;
+      margin-bottom: 6px;
+    }
+
+    .cell-form select,
+    .cell-form input {
+      width: 100%;
+      padding: 4px 5px;
+      border: 1px solid #b0c4d8;
+      border-radius: 4px;
+      font-size: 0.82rem;
+      font-family: inherit;
+      background: white;
+    }
+
+    .cell-form select optgroup {
+      font-weight: bold;
+      color: #1a3a5c;
+      background: #e8f0f8;
+    }
+
+    .cell-form select:focus, .cell-form input:focus {
+      outline: 2px solid #1a6fbf;
+      border-color: #1a6fbf;
+    }
+
+    .commit-btn {
+      padding: 4px;
+      background: #1a6fbf;
+      color: white;
+      border: none;
+      border-radius: 4px;
+      cursor: pointer;
+      font-size: 0.8rem;
+      font-family: inherit;
+    }
+    .commit-btn:hover { background: #155a9d; }
+
+    .booked-list {
+      border-top: 1px dashed #b0c4d8;
+      padding-top: 5px;
+      margin-top: 4px;
+      text-align: left;
+      font-size: 0.78rem;
+    }
+    .booked-list-title {
+      font-weight: bold;
+      color: #555;
+      margin-bottom: 2px;
+    }
+    .booked-entry {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      background: #fde0e0;
+      border: 1px solid #f0b0b0;
+      border-radius: 3px;
+      padding: 2px 4px;
+      margin-bottom: 2px;
+      color: #333;
+    }
+    .booked-entry .del-btn {
+      background: transparent;
+      border: none;
+      color: #c00;
+      cursor: pointer;
+      font-weight: bold;
+      font-size: 0.95rem;
+      padding: 0 4px;
+    }
+    .booked-entry .del-btn:hover { color: #800; }
+
+    /* Modal */
+    .modal-bg {
+      display: none;
+      position: fixed; top: 0; left: 0; right: 0; bottom: 0;
+      background: rgba(0,0,0,0.5);
+      z-index: 1000;
+      justify-content: center;
+      align-items: center;
+    }
+    .modal-bg.show { display: flex; }
+    .modal {
+      background: white;
+      padding: 24px;
+      border-radius: 8px;
+      min-width: 400px;
+      max-width: 600px;
+      max-height: 85vh;
+      overflow-y: auto;
+    }
+    .modal h2 { color: #1a3a5c; margin-bottom: 14px; }
+    .modal label { display: block; margin: 10px 0 4px; font-weight: bold; }
+    .modal input, .modal textarea {
+      width: 100%; padding: 6px; border: 1px solid #b0c4d8; border-radius: 4px;
+      font-family: inherit; font-size: 0.9rem;
+    }
+    .modal textarea { min-height: 120px; resize: vertical; }
+    .modal-actions {
+      display: flex; gap: 8px; justify-content: flex-end; margin-top: 16px;
+    }
+    .modal-actions button {
+      padding: 6px 16px; border-radius: 4px; cursor: pointer;
+      font-family: inherit; border: 1px solid #1a3a5c;
+    }
+    .modal-actions .primary { background: #1a3a5c; color: white; }
+    .modal-actions .secondary { background: white; color: #1a3a5c; }
+    .hint { font-size: 0.8rem; color: #777; margin-top: 4px; }
+
+    .admin-section {
+      border: 1px solid #d0dce8;
+      padding: 12px;
+      margin: 10px 0;
+      border-radius: 6px;
+      background: #fafbfc;
+    }
+    .admin-section h3 { color: #1a3a5c; margin-bottom: 8px; font-size: 1rem; }
+  </style>
+</head>
+<body>
+
+<div class="top-bar">
+  <h1>📋 電腦借閱登記表</h1>
+  <div style="display:flex;gap:10px;align-items:center;">
+    <span id="sync-status">連線中…</span>
+    <button class="admin-btn" id="admin-btn" onclick="openAdmin()">🔐 管理員</button>
+  </div>
+</div>
+
+<div id="week-label"></div>
+
+<div class="week-nav">
+  <button onclick="changeWeek(-1)">◀ 上一週</button>
+  <button onclick="changeWeek(0)">本週</button>
+  <button onclick="changeWeek(1)">下一週 ▶</button>
+</div>
+
+<div class="table-wrapper">
+  <table id="schedule-table">
+    <thead id="table-head"></thead>
+    <tbody id="table-body"></tbody>
+  </table>
+</div>
+
+<!-- 管理員登入 / 控制台 -->
+<div class="modal-bg" id="admin-modal">
+  <div class="modal" id="admin-modal-content"></div>
+</div>
+
+<script>
+  // ===== 預設設定 =====
+  const DEFAULT_CONFIG = {
+    classesByGrade: {
+      "七年級": ["701","702","703","704","705","706","707"],
+      "八年級": ["801","802","803","804","805","806"],
+      "九年級": ["901","902","903","904","905"]
+    },
+    carts: ["創客教室1車", "創客教室2車", "分組討論教室3車"],
+    adminPasswordHash: "" // SHA-256 of password; 預設密碼: admin1234
+  };
+
+  // SHA-256 of "admin1234"
+  const DEFAULT_PASSWORD_HASH =
+    "5b1c46df8049c4d36b785137ddb7a0488df1be9eec1eaa1ea3cd5f463fd4ce5b";
+
+  const PERIODS = [
+    { key: "p0", label: "早自習" },
+    { key: "p1", label: "第一節" },
+    { key: "p2", label: "第二節" },
+    { key: "p3", label: "第三節" },
+    { key: "p4", label: "第四節" },
+    { key: "lunch", label: "午　休", isLunch: true },
+    { key: "p5", label: "第五節" },
+    { key: "p6", label: "第六節" },
+    { key: "p7", label: "第七節" },
+    { key: "p8", label: "第八節" }
+  ];
+
+  const DAYS = ["星期一","星期二","星期三","星期四","星期五"];
+
+  let weekOffset = 0;
+  let config = JSON.parse(JSON.stringify(DEFAULT_CONFIG));
+  if (!config.adminPasswordHash) config.adminPasswordHash = DEFAULT_PASSWORD_HASH;
+
+  let bookings = {};       // 來自 Firebase
+  let isAdmin = false;
+
+  // ===== 日期工具 =====
+  function getMondayOfWeek(offset) {
+    const today = new Date();
+    const day = today.getDay();
+    const diff = (day === 0 ? -6 : 1 - day);
+    const monday = new Date(today);
+    monday.setDate(today.getDate() + diff + offset * 7);
+    monday.setHours(0,0,0,0);
+    return monday;
+  }
+  function fmtMD(d) { return `${d.getMonth()+1}/${d.getDate()}`; }
+  function fmtYMD(d) {
+    const m = String(d.getMonth()+1).padStart(2,"0");
+    const day = String(d.getDate()).padStart(2,"0");
+    return `${d.getFullYear()}-${m}-${day}`;
+  }
+  function getWeekDates(offset) {
+    const monday = getMondayOfWeek(offset);
+    return Array.from({length:5},(_,i)=>{
+      const d = new Date(monday); d.setDate(monday.getDate()+i); return d;
+    });
+  }
+  function changeWeek(t) {
+    if (t === 0) weekOffset = 0; else weekOffset += t;
+    renderTable();
+  }
+
+  // ===== Firebase 連線 =====
+  function setupSync() {
+    const statusEl = document.getElementById("sync-status");
+    if (!window.__firebaseReady) {
+      statusEl.textContent = "⚠ 離線模式（未設定 Firebase）";
+      statusEl.className = "offline";
+      return;
+    }
+    statusEl.textContent = "● 即時同步中";
+    statusEl.className = "online";
+
+    const { db, ref, onValue } = window.fb;
+
+    // 監聽 bookings
+    onValue(ref(db, "bookings"), (snap) => {
+      bookings = snap.val() || {};
+      renderTable();
+    });
+
+    // 監聽 config（管理員修改的班級/密碼）
+    onValue(ref(db, "config"), (snap) => {
+      const remote = snap.val();
+      if (remote) {
+        config = { ...config, ...remote };
+        if (!config.adminPasswordHash) config.adminPasswordHash = DEFAULT_PASSWORD_HASH;
+      }
+      renderTable();
+    });
+  }
+
+  async function sha256(text) {
+    const buf = new TextEncoder().encode(text);
+    const hash = await crypto.subtle.digest("SHA-256", buf);
+    return Array.from(new Uint8Array(hash)).map(b=>b.toString(16).padStart(2,"0")).join("");
+  }
+
+  // ===== 預約資料路徑 =====
+  // bookings/{YYYY-MM-DD}/{periodKey}/{cartId}: {class, borrower, ts}
+  function bookingPath(dateStr, periodKey, cartId) {
+    const safeCart = cartId.replace(/[.#$/\[\]]/g, "_");
+    return `bookings/${dateStr}/${periodKey}/${safeCart}`;
+  }
+  function getCellBookings(dateStr, periodKey) {
+    return (bookings[dateStr] && bookings[dateStr][periodKey]) || {};
+  }
+
+  async function writeBooking(dateStr, periodKey, cart, klass, borrower) {
+    if (!window.__firebaseReady) {
+      alert("尚未設定 Firebase，無法儲存。請先依說明設定。");
+      return;
+    }
+    const { db, ref, set } = window.fb;
+    await set(ref(db, bookingPath(dateStr, periodKey, cart)), {
+      class: klass,
+      borrower: borrower || "",
+      ts: Date.now()
+    });
+  }
+  async function deleteBooking(dateStr, periodKey, cart) {
+    if (!window.__firebaseReady) return;
+    const { db, ref, remove } = window.fb;
+    await remove(ref(db, bookingPath(dateStr, periodKey, cart)));
+  }
+
+  // ===== 渲染 =====
+  // takenClasses / takenCarts: 該節已被登記的班級/電腦車，要禁用選項
+  function buildClassSelect(takenClasses = new Set()) {
+    const sel = document.createElement("select");
+    const blank = document.createElement("option");
+    blank.value = ""; blank.textContent = "-- 班級 --";
+    sel.appendChild(blank);
+    Object.entries(config.classesByGrade).forEach(([grade, list]) => {
+      const group = document.createElement("optgroup");
+      group.label = `───── ${grade} ─────`;
+      list.forEach(c => {
+        const o = document.createElement("option");
+        o.value = c; o.textContent = c;
+        if (takenClasses.has(c)) {
+          o.disabled = true;
+          o.textContent = `${c}（已借）`;
+          o.style.color = "#bbb";
+        }
+        group.appendChild(o);
+      });
+      sel.appendChild(group);
+    });
+    return sel;
+  }
+  function buildCartSelect(takenCarts = new Set()) {
+    const sel = document.createElement("select");
+    const blank = document.createElement("option");
+    blank.value = ""; blank.textContent = "-- 電腦車 --";
+    sel.appendChild(blank);
+    config.carts.forEach(c => {
+      const o = document.createElement("option");
+      o.value = c; o.textContent = c;
+      if (takenCarts.has(c)) {
+        o.disabled = true;
+        o.textContent = `${c}（已借）`;
+        o.style.color = "#bbb";
+      }
+      sel.appendChild(o);
+    });
+    return sel;
+  }
+
+  function renderTable() {
+    const dates = getWeekDates(weekOffset);
+    document.getElementById("week-label").textContent =
+      `${dates[0].getFullYear()} 年 ${fmtMD(dates[0])} ～ ${fmtMD(dates[4])}`;
+
+    const thead = document.getElementById("table-head");
+    thead.innerHTML = "";
+    const headRow = document.createElement("tr");
+    const corner = document.createElement("th");
+    corner.textContent = "節次"; corner.className = "period-header";
+    headRow.appendChild(corner);
+    dates.forEach((d,i)=>{
+      const th = document.createElement("th"); th.className = "day-header";
+      th.innerHTML = `${DAYS[i]}<br><span style="font-size:0.82rem;font-weight:normal">${d.getFullYear()}/${fmtMD(d)}</span>`;
+      headRow.appendChild(th);
+    });
+    thead.appendChild(headRow);
+
+    const tbody = document.getElementById("table-body");
+    tbody.innerHTML = "";
+
+    PERIODS.forEach(period => {
+      const tr = document.createElement("tr");
+      const tdLabel = document.createElement("td");
+      tdLabel.className = "period-label" + (period.isLunch ? " lunch" : "");
+      tdLabel.textContent = period.label;
+      tr.appendChild(tdLabel);
+
+      dates.forEach(date => {
+        const dateStr = fmtYMD(date);
+        const td = document.createElement("td");
+
+        // 計算此節已佔用的班級與電腦車
+        const cellBookingsForForm = getCellBookings(dateStr, period.key);
+        const takenClasses = new Set();
+        const takenCarts = new Set();
+        config.carts.forEach(c => {
+          const id = sanitize(c);
+          const b = cellBookingsForForm[id];
+          if (b && b.class) {
+            takenClasses.add(b.class);
+            takenCarts.add(c);
+          }
+        });
+
+        // 表單
+        const form = document.createElement("div");
+        form.className = "cell-form";
+
+        const classSel = buildClassSelect(takenClasses);
+        const borrowerInp = document.createElement("input");
+        borrowerInp.type = "text"; borrowerInp.placeholder = "借閱者";
+        const cartSel = buildCartSelect(takenCarts);
+        const btn = document.createElement("button");
+        btn.className = "commit-btn"; btn.textContent = "+ 登記";
+
+        btn.onclick = async () => {
+          const klass = classSel.value;
+          const cart = cartSel.value;
+          const borrower = borrowerInp.value.trim();
+          if (!klass || !cart) {
+            alert("請選擇班級與電腦車（借閱者可空）。");
+            return;
+          }
+          // 即時再檢查一次，避免兩人同時送出搶同一台車或同一班
+          const existing = getCellBookings(dateStr, period.key);
+          for (const [id, b] of Object.entries(existing)) {
+            if (!b || !b.class) continue;
+            if (id === sanitize(cart)) {
+              alert(`「${cart}」這節剛被 ${b.class} 登記走了，請重選。`);
+              return;
+            }
+            if (b.class === klass) {
+              alert(`${klass} 這節已經登記過了（${cart === b ? "" : ""}），請勿重複借閱。`);
+              return;
+            }
+          }
+          await writeBooking(dateStr, period.key, sanitize(cart), klass, borrower);
+          classSel.value = ""; borrowerInp.value = ""; cartSel.value = "";
+        };
+
+        form.appendChild(classSel);
+        form.appendChild(borrowerInp);
+        form.appendChild(cartSel);
+        form.appendChild(btn);
+        td.appendChild(form);
+
+        // 已借閱列表
+        const cellBookings = cellBookingsForForm;
+        const list = document.createElement("div");
+        list.className = "booked-list";
+        const title = document.createElement("div");
+        title.className = "booked-list-title"; title.textContent = "已借閱：";
+        list.appendChild(title);
+
+        const entries = Object.entries(cellBookings);
+        if (entries.length === 0) {
+          const empty = document.createElement("div");
+          empty.style.color = "#aaa"; empty.style.fontSize = "0.75rem";
+          empty.textContent = "（無）";
+          list.appendChild(empty);
+        } else {
+          // 還原顯示順序：依 carts 設定排序
+          const sortedCarts = config.carts.map(c => [sanitize(c), c]);
+          sortedCarts.forEach(([id, label]) => {
+            if (!cellBookings[id]) return;
+            const b = cellBookings[id];
+            // 任一欄位空（class）視為未借
+            if (!b.class) return;
+            const entry = document.createElement("div");
+            entry.className = "booked-entry";
+            const text = document.createElement("span");
+            text.textContent = `${b.class},${b.borrower || "—"},${label}`;
+            entry.appendChild(text);
+
+            // 刪除鈕（一般人可刪自己這筆；管理員可刪全部）
+            const del = document.createElement("button");
+            del.className = "del-btn"; del.textContent = "×";
+            del.title = "取消這筆借閱";
+            del.onclick = async () => {
+              if (!confirm(`取消借閱：${b.class} / ${label}？`)) return;
+              await deleteBooking(dateStr, period.key, id);
+            };
+            entry.appendChild(del);
+            list.appendChild(entry);
+          });
+        }
+        td.appendChild(list);
+        tr.appendChild(td);
+      });
+
+      tbody.appendChild(tr);
+    });
+  }
+
+  function sanitize(cart) {
+    return cart.replace(/[.#$/\[\]]/g, "_");
+  }
+
+  // ===== 管理員 =====
+  function openAdmin() {
+    const modal = document.getElementById("admin-modal");
+    const content = document.getElementById("admin-modal-content");
+    if (!isAdmin) {
+      content.innerHTML = `
+        <h2>🔐 管理員登入</h2>
+        <label>密碼</label>
+        <input type="password" id="admin-pw" placeholder="請輸入管理員密碼" autofocus>
+        <div class="hint">預設密碼：admin1234（登入後可在「修改密碼」變更）</div>
+        <div class="modal-actions">
+          <button class="secondary" onclick="closeAdmin()">取消</button>
+          <button class="primary" onclick="loginAdmin()">登入</button>
+        </div>
+      `;
+      modal.classList.add("show");
+      setTimeout(()=>{
+        const inp = document.getElementById("admin-pw");
+        inp.onkeydown = e => { if (e.key === "Enter") loginAdmin(); };
+      }, 50);
+    } else {
+      renderAdminPanel();
+      modal.classList.add("show");
+    }
+  }
+  function closeAdmin() {
+    document.getElementById("admin-modal").classList.remove("show");
+  }
+  async function loginAdmin() {
+    const pw = document.getElementById("admin-pw").value;
+    const hash = await sha256(pw);
+    if (hash === config.adminPasswordHash) {
+      isAdmin = true;
+      document.getElementById("admin-btn").classList.add("active");
+      document.getElementById("admin-btn").textContent = "🔓 管理中";
+      renderAdminPanel();
+    } else {
+      alert("密碼錯誤");
+    }
+  }
+  function logoutAdmin() {
+    isAdmin = false;
+    document.getElementById("admin-btn").classList.remove("active");
+    document.getElementById("admin-btn").textContent = "🔐 管理員";
+    closeAdmin();
+  }
+
+  function renderAdminPanel() {
+    const content = document.getElementById("admin-modal-content");
+    const grades = Object.entries(config.classesByGrade)
+      .map(([g, list]) => `
+        <div style="margin-bottom:8px;">
+          <label>${g}</label>
+          <input type="text" data-grade="${g}" value="${list.join(", ")}" style="width:100%">
+        </div>
+      `).join("");
+
+    content.innerHTML = `
+      <h2>🔧 管理員控制台</h2>
+
+      <div class="admin-section">
+        <h3>班級清單（以逗號分隔）</h3>
+        ${grades}
+        <div class="hint">例如：701, 702, 703… 修改後按「儲存班級」。</div>
+        <div style="margin-top:8px">
+          <button class="admin-btn" onclick="saveClasses()">儲存班級</button>
+        </div>
+      </div>
+
+      <div class="admin-section">
+        <h3>電腦車清單</h3>
+        <input type="text" id="carts-input" value="${config.carts.join(", ")}" style="width:100%">
+        <div class="hint">以逗號分隔。例如：創客教室1車, 創客教室2車, 分組討論教室3車</div>
+        <div style="margin-top:8px">
+          <button class="admin-btn" onclick="saveCarts()">儲存電腦車</button>
+        </div>
+      </div>
+
+      <div class="admin-section">
+        <h3>修改管理員密碼</h3>
+        <input type="password" id="new-pw" placeholder="新密碼（至少 6 碼）">
+        <div style="margin-top:8px">
+          <button class="admin-btn" onclick="changePassword()">更新密碼</button>
+        </div>
+      </div>
+
+      <div class="modal-actions">
+        <button class="secondary" onclick="logoutAdmin()">登出</button>
+        <button class="primary" onclick="closeAdmin()">關閉</button>
+      </div>
+    `;
+  }
+
+  async function saveClasses() {
+    const inputs = document.querySelectorAll('[data-grade]');
+    const newGrades = {};
+    inputs.forEach(inp => {
+      const g = inp.dataset.grade;
+      newGrades[g] = inp.value.split(",").map(s=>s.trim()).filter(Boolean);
+    });
+    config.classesByGrade = newGrades;
+    await pushConfig();
+    alert("班級已儲存");
+  }
+  async function saveCarts() {
+    const v = document.getElementById("carts-input").value;
+    config.carts = v.split(",").map(s=>s.trim()).filter(Boolean);
+    await pushConfig();
+    alert("電腦車已儲存");
+  }
+  async function changePassword() {
+    const pw = document.getElementById("new-pw").value;
+    if (pw.length < 6) { alert("密碼至少 6 碼"); return; }
+    config.adminPasswordHash = await sha256(pw);
+    await pushConfig();
+    alert("密碼已更新");
+  }
+  async function pushConfig() {
+    if (!window.__firebaseReady) { renderTable(); return; }
+    const { db, ref, set } = window.fb;
+    await set(ref(db, "config"), {
+      classesByGrade: config.classesByGrade,
+      carts: config.carts,
+      adminPasswordHash: config.adminPasswordHash
+    });
+  }
+
+  window.openAdmin = openAdmin;
+  window.closeAdmin = closeAdmin;
+  window.loginAdmin = loginAdmin;
+  window.logoutAdmin = logoutAdmin;
+  window.saveClasses = saveClasses;
+  window.saveCarts = saveCarts;
+  window.changePassword = changePassword;
+  window.changeWeek = changeWeek;
+
+  // 啟動
+  setTimeout(() => {
+    setupSync();
+    renderTable();
+  }, 300);
+</script>
+
+</body>
+</html>
