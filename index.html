@@ -168,6 +168,27 @@
       font-size: 0.82rem;
       font-family: inherit;
       background: white;
+      -webkit-appearance: menulist;
+      appearance: menulist;
+    }
+
+    /* 手機版：放大觸碰區、避免 iOS 自動縮放 */
+    @media (max-width: 768px), (pointer: coarse) {
+      body { min-width: unset; padding: 8px; }
+      .cell-form select,
+      .cell-form input {
+        font-size: 16px;
+        padding: 8px 6px;
+        min-height: 40px;
+      }
+      .commit-btn {
+        font-size: 15px;
+        padding: 10px;
+        min-height: 42px;
+      }
+      thead th.day-header { min-width: 220px; }
+      .booked-list { font-size: 0.85rem; }
+      .booked-entry .del-btn { font-size: 1.3rem; padding: 4px 10px; }
     }
 
     .cell-form select optgroup {
