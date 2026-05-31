@@ -177,18 +177,26 @@
       body { min-width: unset; padding: 8px; }
       .cell-form select,
       .cell-form input {
-        font-size: 16px;
-        padding: 8px 6px;
-        min-height: 40px;
+        font-size: 16px !important;
+        padding: 10px 8px !important;
+        min-height: 44px !important;
+        -webkit-appearance: menulist !important;
+        appearance: menulist !important;
+        background-image: none !important;
+        touch-action: manipulation;
+        position: relative;
+        z-index: 2;
       }
       .commit-btn {
         font-size: 15px;
-        padding: 10px;
-        min-height: 42px;
+        padding: 12px;
+        min-height: 44px;
+        touch-action: manipulation;
       }
-      thead th.day-header { min-width: 220px; }
-      .booked-list { font-size: 0.85rem; }
-      .booked-entry .del-btn { font-size: 1.3rem; padding: 4px 10px; }
+      thead th.day-header { min-width: 240px; }
+      .booked-list { font-size: 0.9rem; }
+      .booked-entry .del-btn { font-size: 1.4rem; padding: 4px 12px; }
+      .table-wrapper { -webkit-overflow-scrolling: touch; }
     }
 
     .cell-form select optgroup {
@@ -461,7 +469,17 @@
     const blank = document.createElement("option");
     blank.value = ""; blank.textContent = "-- 班級 --";
     sel.appendChild(blank);
-    Object.entries(config.classesByGrade).forEach(([grade, list]) => {
+    const GRADE_ORDER = ["七年級","八年級","九年級","十年級","十一年級","十二年級"];
+    const sortedGrades = Object.keys(config.classesByGrade).sort((a, b) => {
+      const ia = GRADE_ORDER.indexOf(a);
+      const ib = GRADE_ORDER.indexOf(b);
+      if (ia === -1 && ib === -1) return a.localeCompare(b);
+      if (ia === -1) return 1;
+      if (ib === -1) return -1;
+      return ia - ib;
+    });
+    sortedGrades.forEach(grade => {
+      const list = config.classesByGrade[grade];
       const group = document.createElement("optgroup");
       group.label = `───── ${grade} ─────`;
       list.forEach(c => {
@@ -684,13 +702,24 @@
 
   function renderAdminPanel() {
     const content = document.getElementById("admin-modal-content");
-    const grades = Object.entries(config.classesByGrade)
-      .map(([g, list]) => `
+    const GRADE_ORDER_ADMIN = ["七年級","八年級","九年級","十年級","十一年級","十二年級"];
+    const sortedAdminGrades = Object.keys(config.classesByGrade).sort((a, b) => {
+      const ia = GRADE_ORDER_ADMIN.indexOf(a);
+      const ib = GRADE_ORDER_ADMIN.indexOf(b);
+      if (ia === -1 && ib === -1) return a.localeCompare(b);
+      if (ia === -1) return 1;
+      if (ib === -1) return -1;
+      return ia - ib;
+    });
+    const grades = sortedAdminGrades.map(g => {
+      const list = config.classesByGrade[g];
+      return `
         <div style="margin-bottom:8px;">
           <label>${g}</label>
           <input type="text" data-grade="${g}" value="${list.join(", ")}" style="width:100%">
         </div>
-      `).join("");
+      `;
+    }).join("");
 
     content.innerHTML = `
       <h2>🔧 管理員控制台</h2>
